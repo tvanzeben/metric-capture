@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Metric Capture</string>
+    <string name="camera_permission_required">Camera permission is required.</string>
+    <string name="opencv_initialization_failed">OpenCV native runtime failed to initialize.</string>
+    <string name="checking_camera_capabilities">Checking camera capabilities…</string>
+    <string name="meter_and_review_settings">0. Meter and review camera settings</string>
+    <string name="metering_position_instruction">At printed 0°, hold still in an oblique view with the artifact and whole mat visible.</string>
+    <string name="calibrate_empty_mat">1. Calibrate empty mat</string>
+    <string name="empty_mat_instruction">Keep the artifact off the mat. Hold the whole mat in view for eight RAW reference exposures…</string>
+    <string name="establish_guidance_zero">2. Establish user guidance zero</string>
+    <string name="align_artifact_center">At the mat\'s printed 0° position, align vertically with the artifact center.</string>
+    <string name="move_phone_vertically">Move the phone vertically until the artifact center aligns with the reticle.</string>
+    <string name="show_entire_mat">Back up or tilt until the entire mat is visible with a small border.</string>
+    <string name="phone_orientation_unavailable">Phone orientation is not available yet. Hold still and try again.</string>
+    <string name="guidance_zero_locked">Guidance zero locked to your starting position. Move to the upper-pass target.</string>
+    <string name="reconstruct_metric_ply">3. Reconstruct metric PLY</string>
+    <string name="share_ply">Share PLY</string>
+    <string name="capture_paused">Capture paused: %1$s</string>
+    <string name="opening_camera">Opening camera %1$s… At printed 0°, place the artifact and whole mat in an oblique view for metering.</string>
+    <string name="place_and_meter">Place the artifact and whole mat in view, then meter camera settings.</string>
+    <string name="focus_calibration_progress">Exact RAW focus probe %1$d of %2$d: measuring stepped-gray depth of field…</string>
+    <string name="empty_mat_progress">Empty-mat reference %1$d/%2$d</string>
+    <string name="reference_locked">Reference locked. Place the artifact without moving the mat.</string>
+    <string name="saved_capture_set_restored">Saved capture set restored (36/36). Reconstruct when ready.</string>
+    <string name="saved_project_restored">Saved project restored (%1$d/36). Re-establish user guidance zero to continue.</string>
+    <string name="place_artifact_keep_mat_visible">Place the artifact and keep the calibrated mat visible.</string>
+    <string name="validating_override">Validating the override against the stepped-gray field…</string>
+    <string name="starting_reconstruction">Starting checkpointed on-device reconstruction…</string>
+    <string name="reconstruction_progress">%1$s: %2$d/%3$d</string>
+</resources>
