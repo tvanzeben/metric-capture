@@ -172,7 +172,7 @@ class MatPoseProcessor(
 
     private fun detectAndSolve(timestamp: Long, gray: Mat, frame: FramePlanes): MatPoseResult? {
         val targets = detectTargets(gray, frame)
-        if (targets.size < 8) {
+        if (targets.size < 4) {
             logDetectionDiagnostic(
                 "target decode ${targets.size}/8; frame=${gray.cols()}x${gray.rows()}"
             )
@@ -488,67 +488,37 @@ class MatPoseProcessor(
             val candidate = decoded.copy(confidence = decoded.confidence * templateMatch)
             if (best == null || candidate.confidence > best.confidence) best = candidate
         }
-        return best?.takeIf { it.confidence >= 0.60 }
+        return best?.takeIf { it.confidence >= 0.35 }
     }
 
     private fun candidateAssignments(targets: List<TargetObservation>): List<List<FiducialObservation>> {
-        val center = Point(targets.map { it.center.x }.average(), targets.map { it.center.y }.average())
-        val byRadius = targets.sortedBy { distance(it.center, center) }
-        val inner = byRadius.take(4)
-        val outer = byRadius.takeLast(4)
-
-        // Ring position and printed target size are both part of the symbol system.
-        // Keep this check deliberately loose because perspective changes local scale.
-        if (outer.map { it.radiusPx }.average() < inner.map { it.radiusPx }.average() * 1.20) {
-            return emptyList()
+        if (targets.size < 4) return emptyList()
+        val results = mutableListOf<List<FiducialObservation>>()
+        for (quarterTurn in 0 until 4) {
+            val assigned = mutableMapOf<FiducialId, FiducialObservation>()
+            for (target in targets) {
+                var bestId: FiducialId? = null
+                var bestScore = 0.20
+                for (id in FiducialId.values()) {
+                    val score = codeScore(target, id, quarterTurn)
+                    if (score > bestScore) {
+                        bestScore = score
+                        bestId = id
+                    }
+                }
+                if (bestId != null) {
+                    val obs = target.asFiducial(bestId, quarterTurn)
+                    val existing = assigned[bestId]
+                    if (existing == null || obs.codeConfidence > existing.codeConfidence) {
+                        assigned[bestId] = obs
+                    }
+                }
+            }
+            if (assigned.size >= 4) {
+                results += assigned.values.toList()
+            }
         }
-
-        // All crosses were printed in one mat coordinate system. Try one shared
-        // quarter-turn for the entire layout; do not rotate each code independently,
-        // which would discard the black/white ordering that distinguishes the codes.
-        return (0 until 4).flatMap { codeQuarterTurn ->
-            candidateAssignmentsForQuarterTurn(outer, inner, codeQuarterTurn)
-        }
-    }
-
-    private fun candidateAssignmentsForQuarterTurn(
-        outer: List<TargetObservation>,
-        inner: List<TargetObservation>,
-        codeQuarterTurn: Int,
-    ): List<List<FiducialObservation>> {
-        val (a, b) = bestDistinctAnchors(
-            outer, FiducialId.A, FiducialId.B, codeQuarterTurn
-        )
-            ?: return emptyList()
-        val (g, h) = bestDistinctAnchors(
-            inner, FiducialId.G, FiducialId.H, codeQuarterTurn
-        )
-            ?: return emptyList()
-        val outerMono = outer.filter { it !== a && it !== b }
-        val innerMono = inner.filter { it !== g && it !== h }
-        if (outerMono.size != 2 || innerMono.size != 2) return emptyList()
-        if (outerMono.any { codeScore(it, FiducialId.C, codeQuarterTurn) < 0.60 } ||
-            innerMono.any { codeScore(it, FiducialId.E, codeQuarterTurn) < 0.60 }
-        ) return emptyList()
-
-        val assignments = mutableListOf<List<FiducialObservation>>()
-        for (swapOuter in listOf(false, true)) for (swapInner in listOf(false, true)) {
-            val c = outerMono[if (swapOuter) 1 else 0]
-            val d = outerMono[if (swapOuter) 0 else 1]
-            val e = innerMono[if (swapInner) 1 else 0]
-            val f = innerMono[if (swapInner) 0 else 1]
-            assignments += listOf(
-                a.asFiducial(FiducialId.A, codeQuarterTurn),
-                b.asFiducial(FiducialId.B, codeQuarterTurn),
-                c.asFiducial(FiducialId.C, codeQuarterTurn),
-                d.asFiducial(FiducialId.D, codeQuarterTurn),
-                e.asFiducial(FiducialId.E, codeQuarterTurn),
-                f.asFiducial(FiducialId.F, codeQuarterTurn),
-                g.asFiducial(FiducialId.G, codeQuarterTurn),
-                h.asFiducial(FiducialId.H, codeQuarterTurn),
-            )
-        }
-        return assignments
+        return results
     }
 
     private fun solve(timestamp: Long, observations: List<FiducialObservation>): MatPoseResult? {
@@ -725,7 +695,7 @@ class MatPoseProcessor(
             if (first === second) continue
             val firstScore = codeScore(first, firstId, codeQuarterTurn)
             val secondScore = codeScore(second, secondId, codeQuarterTurn)
-            if (firstScore < 0.60 || secondScore < 0.60) continue
+            if (firstScore < 0.35 || secondScore < 0.35) continue
             val score = firstScore + secondScore
             if (score > bestScore) {
                 bestScore = score
