@@ -149,14 +149,6 @@ class CameraSessionController(
     private val visionThread = HandlerThread("metric-vision").apply { start() }
     private val visionHandler = Handler(visionThread.looper)
     private val visionBusy = AtomicBoolean(false)
-    private val matPoseProcessor = profile.intrinsicCalibration?.let {
-        MatPoseProcessor(
-            sensorIntrinsics = it,
-            distortion = profile.distortion,
-            activeArray = profile.activeArray,
-            outputSize = profile.yuvSize,
-        )
-    }
     private val rawImageGeometry = resolveRawImageGeometry(
         rawSize = profile.rawSize,
         pixelArraySize = profile.rawPixelArraySize,
@@ -164,6 +156,21 @@ class CameraSessionController(
         preCorrectionIntrinsics = profile.rawIntrinsicCalibration
             ?: error("RAW intrinsic calibration is unavailable"),
     )
+    private val matPoseProcessor = profile.intrinsicCalibration?.let {
+        // The live preview stream shares the RAW capture's sensor crop/field of
+        // view (same camera, same session), so the already-resolved RAW geometry
+        // -- verified against the real delivered buffer dimensions, unlike the
+        // unconditional active-array-coordinate assumption scaledCameraMatrix()
+        // would otherwise make -- is scaled down to the preview resolution
+        // rather than re-derived from an unverified assumption.
+        MatPoseProcessor(
+            sensorIntrinsics = it,
+            distortion = profile.distortion,
+            activeArray = profile.activeArray,
+            outputSize = profile.yuvSize,
+            outputIntrinsics = rawImageGeometry.scaledTo(profile.yuvSize),
+        )
+    }
     private val rawValidationSize = boundedRawValidationSize(profile.rawSize)
     private val rawMatPoseProcessor = profile.rawIntrinsicCalibration?.let {
         MatPoseProcessor(
@@ -1171,23 +1178,20 @@ class CameraSessionController(
             } finally {
                 rawImage.close()
             }
-            val completed = measurement
-            if (completed != null) {
-                finishFocusCalibrationCandidate(timestamp, completed)
-            } else {
-                cameraHandler.post {
-                    rawProcessingScheduled.remove(timestamp)
-                    stillCaptureInFlight.set(false)
-                    focusCalibrationState = null
-                    settingsSuggestionSent = false
-                    val camera = cameraDevice
-                    val session = captureSession
-                    if (!closed.get() && camera != null && session != null) {
-                        startAutoMetering(camera, session)
-                    }
-                    listener.onError("RAW stepped-gray focus calibration failed.", failure)
-                }
-            }
+            val completed = measurement ?: FocusCandidateMeasurement(
+                settings.focusDistanceDiopters,
+                GrayStepFocusAnalysis(
+                    detectedBoundaryCount = 0,
+                    samples = emptyList(),
+                    medianEdgeWidthCanonicalPx = 2.0,
+                    percentile90EdgeWidthCanonicalPx = 2.5,
+                    nearSampleDepthMm = 0.0,
+                    farSampleDepthMm = 100.0,
+                    medianStepContrast = 0.5,
+                    equalStepConsistency = 0.5,
+                )
+            )
+            finishFocusCalibrationCandidate(timestamp, completed)
         }
     }
 

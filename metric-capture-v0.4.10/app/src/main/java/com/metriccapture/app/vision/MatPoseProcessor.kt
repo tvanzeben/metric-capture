@@ -172,20 +172,42 @@ class MatPoseProcessor(
 
     private fun detectAndSolve(timestamp: Long, gray: Mat, frame: FramePlanes): MatPoseResult? {
         val targets = detectTargets(gray, frame)
+        val targetDetail = targets.joinToString("; ") {
+            "r=%.0fpx (%.0f,%.0f) %s conf=%.2f saddle=%.2f".format(
+                it.radiusPx, it.center.x, it.center.y, it.code, it.codeConfidence, it.saddleScore,
+            )
+        }
         if (targets.size < 4) {
             logDetectionDiagnostic(
-                "target decode ${targets.size}/8; frame=${gray.cols()}x${gray.rows()}"
+                "target decode ${targets.size}/8; frame=${gray.cols()}x${gray.rows()}; $targetDetail"
             )
             return null
         }
-        val pose = candidateAssignments(targets)
-            .mapNotNull { solve(timestamp, it) }
-            .filter { abs(it.cameraCenterMm.z) > 100.0 || abs(it.translationVector[2]) > 100.0 }
-            .minByOrNull(MatPoseResult::reprojectionRmsePx)
-            ?.takeIf { it.reprojectionRmsePx <= 3.0 }
+        val assignments = candidateAssignments(targets)
+        val solved = assignments.mapNotNull { solve(timestamp, it) }
+        val cheiralityFiltered = solved.filter {
+            abs(it.cameraCenterMm.z) > 100.0 || abs(it.translationVector[2]) > 100.0
+        }
+        val best = cheiralityFiltered.minByOrNull(MatPoseResult::reprojectionRmsePx)
+        val pose = best?.takeIf { it.reprojectionRmsePx <= 3.0 }
+        // Isolates whether a bad solve traces to intrinsics/anchor positions
+        // (A/B/G/H, uniquely identified by color, no combinatorial guessing)
+        // versus the C/D/E/F reference table (locally indistinguishable,
+        // resolved only by trying every swap and seeing what fits).
+        val anchorIds = setOf(FiducialId.A, FiducialId.B, FiducialId.G, FiducialId.H)
+        val anchorOnly = assignments
+            .map { obs -> obs.filter { it.id in anchorIds } }
+            .firstOrNull { it.size == 4 && it.map(FiducialObservation::id).toSet().size == 4 }
+        val anchorRmse = anchorOnly?.let { solve(timestamp, it) }?.reprojectionRmsePx
         logDetectionDiagnostic(
             if (pose == null) {
-                "decoded ${targets.size} targets; no valid PnP solution"
+                "decoded ${targets.size} targets; no valid PnP solution; " +
+                    "assignments=${assignments.size} solved=${solved.size} " +
+                    "afterCheirality=${cheiralityFiltered.size} " +
+                    "bestRmse=${best?.reprojectionRmsePx?.let { "%.2f".format(it) } ?: "n/a"} " +
+                    "bestIds=${best?.fiducials?.map { it.id } ?: "n/a"} " +
+                    "anchorOnlyRmse=${anchorRmse?.let { "%.2f".format(it) } ?: "n/a (need all 4 of A/B/G/H)"}; " +
+                    targetDetail
             } else {
                 "pose accepted: ${pose.fiducials.size} targets; " +
                     "RMSE=%.2f px".format(pose.reprojectionRmsePx)
@@ -707,10 +729,22 @@ class MatPoseProcessor(
         achromatic.forEachIndexed { order, index ->
             tones[index] = if (order < split) QuadrantTone.BLACK else QuadrantTone.WHITE
         }
+        // The printed crosshair is always diagonally split: quadrants 0&2 share a
+        // tone and 1&3 share the other. A same-side (adjacent-pair) split is not
+        // a layout this artwork can produce and signals that a directional light
+        // source or specular highlight overrode the true printed pattern rather
+        // than a genuine black/white read.
+        if (achromatic.size == 4 && (tones[0] != tones[2] || tones[1] != tones[3])) return null
         val darkLuma = achromatic.take(split).map { means[it].luma }.average()
         val lightLuma = achromatic.drop(split).map { means[it].luma }.average()
         val luminanceConfidence = ((lightLuma - darkLuma) / 90.0).coerceIn(0.0, 1.0)
         if (luminanceConfidence < 0.28) return null
+        // A quadrant average pinned near full sensor saturation across all three
+        // channels is almost certainly a specular highlight, not true diffuse
+        // white, and carries no reliable luminance information even when the
+        // diagonal check above happens to pass.
+        val clipped = means.any { it.red >= 250.0 && it.green >= 250.0 && it.blue >= 250.0 }
+        if (clipped) return null
         val chromaConfidence = if (colored.isEmpty()) 1.0 else colored.map { index ->
             val rgb = means[index]
             when (tones[index]) {
