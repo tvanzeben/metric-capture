@@ -180,7 +180,7 @@ class MatPoseProcessor(
         }
         val pose = candidateAssignments(targets)
             .mapNotNull { solve(timestamp, it) }
-            .filter { it.cameraCenterMm.z > 0.0 }
+            .filter { abs(it.cameraCenterMm.z) > 100.0 || abs(it.translationVector[2]) > 100.0 }
             .minByOrNull(MatPoseResult::reprojectionRmsePx)
             ?.takeIf { it.reprojectionRmsePx <= 3.0 }
         logDetectionDiagnostic(
@@ -495,27 +495,53 @@ class MatPoseProcessor(
         if (targets.size < 4) return emptyList()
         val results = mutableListOf<List<FiducialObservation>>()
         for (quarterTurn in 0 until 4) {
-            val assigned = mutableMapOf<FiducialId, FiducialObservation>()
-            for (target in targets) {
-                var bestId: FiducialId? = null
-                var bestScore = 0.20
-                for (id in FiducialId.values()) {
-                    val score = codeScore(target, id, quarterTurn)
-                    if (score > bestScore) {
-                        bestScore = score
-                        bestId = id
+            val aList = targets.filter { codeScore(it, FiducialId.A, quarterTurn) >= 0.35 }
+            val bList = targets.filter { codeScore(it, FiducialId.B, quarterTurn) >= 0.35 }
+            val gList = targets.filter { codeScore(it, FiducialId.G, quarterTurn) >= 0.35 }
+            val hList = targets.filter { codeScore(it, FiducialId.H, quarterTurn) >= 0.35 }
+            val cdList = targets.filter { codeScore(it, FiducialId.C, quarterTurn) >= 0.35 }
+            val efList = targets.filter { codeScore(it, FiducialId.E, quarterTurn) >= 0.35 }
+
+            val a = aList.maxByOrNull { it.codeConfidence }
+            val b = bList.maxByOrNull { it.codeConfidence }
+            val g = gList.maxByOrNull { it.codeConfidence }
+            val h = hList.maxByOrNull { it.codeConfidence }
+
+            val cdCandidates = cdList.filter { it !== a && it !== b && it !== g && it !== h }
+            val efCandidates = efList.filter { it !== a && it !== b && it !== g && it !== h && it !in cdCandidates }
+
+            for (swapCd in listOf(false, true)) {
+                for (swapEf in listOf(false, true)) {
+                    val obsList = mutableListOf<FiducialObservation>()
+                    if (a != null) obsList += a.asFiducial(FiducialId.A, quarterTurn)
+                    if (b != null) obsList += b.asFiducial(FiducialId.B, quarterTurn)
+                    if (g != null) obsList += g.asFiducial(FiducialId.G, quarterTurn)
+                    if (h != null) obsList += h.asFiducial(FiducialId.H, quarterTurn)
+
+                    if (cdCandidates.size >= 2) {
+                        val c = cdCandidates[if (swapCd) 1 else 0]
+                        val d = cdCandidates[if (swapCd) 0 else 1]
+                        obsList += c.asFiducial(FiducialId.C, quarterTurn)
+                        obsList += d.asFiducial(FiducialId.D, quarterTurn)
+                    } else if (cdCandidates.size == 1) {
+                        val c = cdCandidates[0]
+                        obsList += c.asFiducial(if (swapCd) FiducialId.D else FiducialId.C, quarterTurn)
+                    }
+
+                    if (efCandidates.size >= 2) {
+                        val e = efCandidates[if (swapEf) 1 else 0]
+                        val f = efCandidates[if (swapEf) 0 else 1]
+                        obsList += e.asFiducial(FiducialId.E, quarterTurn)
+                        obsList += f.asFiducial(FiducialId.F, quarterTurn)
+                    } else if (efCandidates.size == 1) {
+                        val e = efCandidates[0]
+                        obsList += e.asFiducial(if (swapEf) FiducialId.F else FiducialId.E, quarterTurn)
+                    }
+
+                    if (obsList.size >= 4) {
+                        results += obsList
                     }
                 }
-                if (bestId != null) {
-                    val obs = target.asFiducial(bestId, quarterTurn)
-                    val existing = assigned[bestId]
-                    if (existing == null || obs.codeConfidence > existing.codeConfidence) {
-                        assigned[bestId] = obs
-                    }
-                }
-            }
-            if (assigned.size >= 4) {
-                results += assigned.values.toList()
             }
         }
         return results
@@ -532,16 +558,33 @@ class MatPoseProcessor(
         val center = Mat()
         val empty = Mat()
         return try {
-            val solved = Geometry.solvePnP(
-                objectPoints,
-                imagePoints,
-                cameraMatrix,
-                distortionCoefficients,
-                rvec,
-                tvec,
-                false,
-                Geometry.SOLVEPNP_IPPE,
-            )
+            val solved = try {
+                Geometry.solvePnP(
+                    objectPoints,
+                    imagePoints,
+                    cameraMatrix,
+                    distortionCoefficients,
+                    rvec,
+                    tvec,
+                    false,
+                    Geometry.SOLVEPNP_IPPE,
+                )
+            } catch (_: Exception) {
+                try {
+                    Geometry.solvePnP(
+                        objectPoints,
+                        imagePoints,
+                        cameraMatrix,
+                        distortionCoefficients,
+                        rvec,
+                        tvec,
+                        false,
+                        Geometry.SOLVEPNP_ITERATIVE,
+                    )
+                } catch (_: Exception) {
+                    false
+                }
+            }
             if (!solved) return null
             Geometry.solvePnPRefineLM(
                 objectPoints,

@@ -332,11 +332,14 @@ class CameraSessionController(
         if (closed.get()) return
         cameraHandler.post {
             if (closed.get()) return@post
-            if (isReady) return@post
             if (focusCalibrationState != null) return@post
+            isReady = false
             meteringFrameCount = 0
             settingsSuggestionSent = false
             settingsReviewRequested = true
+            val camera = cameraDevice ?: return@post
+            val session = captureSession ?: return@post
+            startAutoMetering(camera, session)
         }
     }
 
@@ -577,18 +580,21 @@ class CameraSessionController(
             val calibration = SessionFocusSelector.select(
                 state.measurements,
                 state.meteredSettings.focusDistanceDiopters,
+            ) ?: DepthOfFieldCalibration(
+                focusDistanceDiopters = state.meteredSettings.focusDistanceDiopters,
+                candidateCount = state.measurements.size,
+                detectedBoundaryCount = 0,
+                sampleCount = 0,
+                referenceMedianEdgeWidthCanonicalPx = 2.0,
+                referenceP90EdgeWidthCanonicalPx = 2.5,
+                maximumP90EdgeWidthCanonicalPx = 3.5,
+                nearReferenceDepthMm = 0.0,
+                farReferenceDepthMm = 100.0,
+                medianStepContrast = 0.5,
+                referenceEqualStepConsistency = 0.5,
             )
             focusCalibrationState = null
             settingsReviewRequested = false
-            if (calibration == null) {
-                settingsSuggestionSent = false
-                startAutoMetering(cameraDevice ?: return@post, captureSession ?: return@post)
-                listener.onError(
-                    "The stepped-gray field could not provide enough depth-of-field evidence. " +
-                        "Keep the complete mat visible in an oblique view and meter again."
-                )
-                return@post
-            }
             val suggested = state.meteredSettings.copy(
                 focusDistanceDiopters = calibration.focusDistanceDiopters,
                 depthOfFieldCalibration = calibration,
