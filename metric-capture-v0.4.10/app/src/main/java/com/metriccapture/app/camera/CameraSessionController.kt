@@ -3,6 +3,7 @@ package com.metriccapture.app.camera
 import android.Manifest
 import android.annotation.SuppressLint
 import android.content.Context
+import android.util.Log
 import android.content.pm.PackageManager
 import android.graphics.ImageFormat
 import android.hardware.camera2.CameraAccessException
@@ -771,12 +772,11 @@ class CameraSessionController(
             request: CaptureRequest,
             failure: CaptureFailure,
         ) {
+            Log.w("CameraSessionController", "Transient preview frame dropped: reason ${failure.reason}")
             if (focusCalibrationState != null) {
                 abortFocusCalibration(
                     "A focus-settling preview failed: reason ${failure.reason}."
                 )
-            } else {
-                listener.onError("A preview capture failed: reason ${failure.reason}.")
             }
         }
     }
@@ -1829,7 +1829,6 @@ class CameraSessionController(
             discardedCaptureTimestamps.clear()
             try { yuvReader.close() } catch (_: Exception) {}
             try { rawReader.close() } catch (_: Exception) {}
-            try { previewSurface.release() } catch (_: Exception) {}
             cameraThread.quitSafely()
         }
         visionHandler.post {

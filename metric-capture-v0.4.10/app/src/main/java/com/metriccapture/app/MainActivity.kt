@@ -2,6 +2,7 @@ package com.metriccapture.app
 
 import android.Manifest
 import android.graphics.Matrix
+import android.graphics.RectF
 import android.graphics.SurfaceTexture
 import android.content.pm.PackageManager
 import android.os.Bundle
@@ -104,8 +105,14 @@ class MainActivity : ComponentActivity() {
                     width: Int,
                     height: Int,
                 ) {
-                    pendingCameraStart?.let { (profile, directory) ->
+                    val profile = activeProfile
+                    val directory = activeSessionDirectory
+                    if (profile != null) {
                         startCamera(profile, directory)
+                    } else {
+                        pendingCameraStart?.let { (p, d) ->
+                            startCamera(p, d)
+                        }
                     }
                 }
 
@@ -218,7 +225,11 @@ class MainActivity : ComponentActivity() {
     override fun onConfigurationChanged(newConfig: Configuration) {
         super.onConfigurationChanged(newConfig)
         setupResponsiveLayout()
-        activeProfile?.let(::configurePreviewTransform)
+        val profile = activeProfile
+        val directory = activeSessionDirectory
+        if (profile != null) {
+            startCamera(profile, directory)
+        }
     }
 
     private fun setupResponsiveLayout() {
@@ -262,11 +273,14 @@ class MainActivity : ComponentActivity() {
                 }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 0.3f))
             } else {
                 orientation = LinearLayout.VERTICAL
-                // Force the camera frame to be landscape (4:3 ratio) in portrait mode
+                // Match the upright 3:4 portrait aspect ratio of the camera feed in portrait mode
                 val screenWidth = resources.displayMetrics.widthPixels
+                val screenHeight = resources.displayMetrics.heightPixels
                 val padding = 40 
                 val cameraWidth = screenWidth - padding
-                val cameraHeight = (cameraWidth * 0.75f).toInt() 
+                val maxCameraHeight = (screenHeight * 0.55f).toInt()
+                val idealCameraHeight = (cameraWidth * 4f / 3f).toInt()
+                val cameraHeight = minOf(idealCameraHeight, maxCameraHeight)
                 
                 addView(cameraContainer, LinearLayout.LayoutParams(cameraWidth, cameraHeight))
                 addView(ScrollView(this@MainActivity).apply {
@@ -778,44 +792,44 @@ class MainActivity : ComponentActivity() {
         }, "Share metric PLY"))
     }
 
-    /** Keeps the complete preview field visible while rotating it into display coordinates. */
+    /** Keeps the complete preview field visible while matching display coordinates. */
     private fun configurePreviewTransform(profile: CaptureProfile) {
         if (preview.width == 0 || preview.height == 0) {
             preview.post { configurePreviewTransform(profile) }
             return
         }
-        val displayDegrees = when (display?.rotation ?: Surface.ROTATION_0) {
-            Surface.ROTATION_90 -> 90
-            Surface.ROTATION_180 -> 180
-            Surface.ROTATION_270 -> 270
-            else -> 0
-        }
-        
-        // Use full sensor width by default, matching the physical 4:3 or 16:9 ratio.
-        val sourceWidth = profile.previewSize.width.toFloat()
-        val sourceHeight = profile.previewSize.height.toFloat()
-        
-        // We always want to show the landscape aspect of the camera.
-        // If the sensor is rotated 90/270 (most phones), we rotate it back to be horizontal
-        // even if the phone is held vertically.
-        val rotationDegrees = (profile.sensorOrientationDegrees - displayDegrees + 360) % 360
-        
-        val rotatedWidth = if (rotationDegrees == 90 || rotationDegrees == 270) sourceHeight else sourceWidth
-        val rotatedHeight = if (rotationDegrees == 90 || rotationDegrees == 270) sourceWidth else sourceHeight
-        
-        // We calculate scale to fit the WIDE camera into the current preview view.
-        val scale = minOf(preview.width / rotatedWidth, preview.height / rotatedHeight)
+        val rotation = display?.rotation ?: Surface.ROTATION_0
+        val viewWidth = preview.width.toFloat()
+        val viewHeight = preview.height.toFloat()
         
         val matrix = Matrix()
-        val centerX = preview.width / 2f
-        val centerY = preview.height / 2f
+        val viewRect = RectF(0f, 0f, viewWidth, viewHeight)
+        val bufferRect = RectF(
+            0f, 0f,
+            profile.previewSize.height.toFloat(),
+            profile.previewSize.width.toFloat()
+        )
+        val centerX = viewRect.centerX()
+        val centerY = viewRect.centerY()
         
-        // Apply the rotation needed to make the camera output appear horizontally correct
-        matrix.postRotate(rotationDegrees.toFloat(), centerX, centerY)
-        matrix.postScale(scale * rotatedWidth / preview.width, scale * rotatedHeight / preview.height, centerX, centerY)
+        if (Surface.ROTATION_90 == rotation || Surface.ROTATION_270 == rotation) {
+            bufferRect.offset(centerX - bufferRect.centerX(), centerY - bufferRect.centerY())
+            matrix.setRectToRect(viewRect, bufferRect, Matrix.ScaleToFit.FILL)
+            val scale = minOf(
+                viewHeight / profile.previewSize.height.toFloat(),
+                viewWidth / profile.previewSize.width.toFloat()
+            )
+            matrix.postScale(scale, scale, centerX, centerY)
+            matrix.postRotate((90 * (rotation - 2)).toFloat(), centerX, centerY)
+        } else if (Surface.ROTATION_180 == rotation) {
+            matrix.postRotate(180f, centerX, centerY)
+        } else {
+            // Surface.ROTATION_0 (Portrait)
+            bufferRect.offset(centerX - bufferRect.centerX(), centerY - bufferRect.centerY())
+            matrix.setRectToRect(viewRect, bufferRect, Matrix.ScaleToFit.CENTER)
+        }
         
         preview.setTransform(matrix)
-    }
     }
 
     override fun onDestroy() {

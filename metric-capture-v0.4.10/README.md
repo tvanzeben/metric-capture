@@ -1,6 +1,6 @@
 # Metric Capture v0.4.10
 
-Metric Capture is one landscape Android application for guided, metric artifact
+Metric Capture is for guided, metric artifact
 photogrammetry with the calibrated A–H mat. Capture, reconstruction,
 checkpointing, and PLY export run on the phone. No Google Cloud component is
 used or required.
@@ -30,11 +30,11 @@ require an Android Studio build and device run.
    Studio Panda 1 and newer use **Gradle Daemon JVM criteria**; if Android Studio
    offers to migrate this imported project to that mode, accept the migration.
    The included Gradle 9.5 wrapper runs on JVM 17 through JVM 26, including JVM
-   25. The Java 17 entries in `app/build.gradle.kts` are the app bytecode target,
+6. The Java 17 entries in `app/build.gradle.kts` are the app bytecode target,
    not an instruction to replace Android Studio's Gradle JVM.
-6. Allow Gradle sync to download Android Gradle Plugin 9.3.2, its built-in
+7. Allow Gradle sync to download Android Gradle Plugin 9.3.2, its built-in
    Kotlin compiler, OpenCV, AndroidX, and the other declared dependencies.
-7. Test on the physical RAW-capable phone rather than an emulator. On the phone,
+8. Test on the physical RAW-capable phone rather than an emulator. On the phone,
    enable Developer options and USB debugging, connect it, accept the debugging
    authorization, select the `app` run configuration and the phone in Android
    Studio's toolbar, then click **Run**. Grant camera permission when Metric
@@ -248,7 +248,7 @@ azimuths and therefore has no nearest-angle tie to resolve.
   schedule neighbors. Each lower-pass frame is offered four upper-pass
   candidates at nominal separations of 10°, 10°, 30°, and 30°.
 - A connection is retained only after mutual ratio matching and fundamental-
-  matrix RANSAC. Successful edges are unioned into tracks spanning two or more
+  matrix RANSAC. Successful edges are union into tracks spanning two or more
   images, so a new lower-pass view contributes to one accumulated feature graph
   rather than producing an isolated pair cloud.
 - Complete one-to-one cross-pass coverage is not required. For the 18+18 grid,
@@ -284,15 +284,14 @@ azimuths and therefore has no nearest-angle tie to resolve.
   edge/noise/tone/crop/WB controls remain confined to the YUV preview request.
   A reported override rejects the capture. Cameras that cannot expose acceptable
   RAW, disable RAW hot-pixel correction/OIS, or report RAW lens-shading already
-  applied do not qualify for this strict pipeline.
+  applied to do not qualify for this strict pipeline.
 - Sparse and dense reconstruction decode bounded-resolution TIFF views from disk
   and scale their intrinsics/feature coordinates back to the full-resolution
   coordinate system. This preserves the full master while bounding peak RAM.
 - Global refinement is implemented as bounded alternating multi-view DLT and
-  all-camera OpenCV LM pose updates. It is not a single joint Ceres normal-
-  equation solve over every camera and point.
+  all-camera OpenCV LM pose updates. It is not a single joint Ceres normal-equation solve over every camera and point.
 - Metric scale and `Z = 0` come directly from the known millimeter mat points
-  used by every camera pose. A free Umeyama similarity transform is not applied
+  used by every camera pose. A free Guayama similarity transform is not applied
   because it would re-estimate a scale and datum already fixed by the mat.
 - Export is a colored binary PLY point cloud with confidence values. Surface
   faces and a texture atlas are outside v0.4.10.
@@ -317,7 +316,7 @@ azimuths and therefore has no nearest-angle tie to resolve.
 
 Install Android SDK Platform 37.0, Android SDK Build Tools 36.0.0, and Platform
 Tools. The included wrapper supplies Gradle 9.5 and supports JVM 17 through JVM
-26. From the project root:
+1. From the project root:
 
 ```bash
 ./gradlew --no-daemon testDebugUnitTest lintDebug assembleDebug
