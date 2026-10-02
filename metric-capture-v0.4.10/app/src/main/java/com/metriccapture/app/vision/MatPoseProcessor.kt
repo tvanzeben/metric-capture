@@ -326,7 +326,7 @@ class MatPoseProcessor(
         val fullResolutionCandidates = candidates.map { it.scaled(1.0 / detectionScale) }
         for (candidate in fullResolutionCandidates) {
             val score = saddleScore(gray, candidate)
-            if (score < 0.45) continue
+            if (score < 0.25) continue
             val refined = refineSaddle(gray, candidate.center, candidate.minimumAxisPx)
                 ?: continue
             val refinedCandidate = candidate.copy(center = refined)
@@ -420,7 +420,7 @@ class MatPoseProcessor(
         var best = 0.0
         for (axisRotationDegrees in 0 until 90 step 5) {
             val means = listOf(-135.0, -45.0, 45.0, 135.0).map { quadrantAngle ->
-                val sample = candidate.imagePoint(quadrantAngle + axisRotationDegrees, 0.35)
+                val sample = candidate.imagePoint(quadrantAngle + axisRotationDegrees, 0.50)
                 meanPatch(
                     gray,
                     sample.x.toInt(),

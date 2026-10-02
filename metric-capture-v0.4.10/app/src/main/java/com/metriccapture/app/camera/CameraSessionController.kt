@@ -1178,20 +1178,23 @@ class CameraSessionController(
             } finally {
                 rawImage.close()
             }
-            val completed = measurement ?: FocusCandidateMeasurement(
-                settings.focusDistanceDiopters,
-                GrayStepFocusAnalysis(
-                    detectedBoundaryCount = 0,
-                    samples = emptyList(),
-                    medianEdgeWidthCanonicalPx = 2.0,
-                    percentile90EdgeWidthCanonicalPx = 2.5,
-                    nearSampleDepthMm = 0.0,
-                    farSampleDepthMm = 100.0,
-                    medianStepContrast = 0.5,
-                    equalStepConsistency = 0.5,
-                )
-            )
-            finishFocusCalibrationCandidate(timestamp, completed)
+            val completed = measurement
+            if (completed != null) {
+                finishFocusCalibrationCandidate(timestamp, completed)
+            } else {
+                cameraHandler.post {
+                    rawProcessingScheduled.remove(timestamp)
+                    stillCaptureInFlight.set(false)
+                    focusCalibrationState = null
+                    settingsSuggestionSent = false
+                    val camera = cameraDevice
+                    val session = captureSession
+                    if (!closed.get() && camera != null && session != null) {
+                        startAutoMetering(camera, session)
+                    }
+                    listener.onError("RAW stepped-gray focus calibration failed.", failure)
+                }
+            }
         }
     }
 
@@ -1205,7 +1208,9 @@ class CameraSessionController(
             var captureAnother = false
             try {
                 val frame = rawFrameProcessor.validationFrame(rawImage, result)
-                val pose = rawMatPoseProcessor?.processExposure(frame)
+                val processor = rawMatPoseProcessor
+                    ?: error("RAW pose processor was never created (rawIntrinsicCalibration missing)")
+                val pose = processor.processExposure(frame)
                     ?: error("The RAW empty-mat exposure did not contain a solvable mat pose")
                 check(pose.timestampNs == timestamp) {
                     "RAW empty-mat pose timestamp does not match its exposure"
@@ -1317,6 +1322,12 @@ class CameraSessionController(
             result.get(CaptureResult.LENS_OPTICAL_STABILIZATION_MODE),
             CameraMetadata.LENS_OPTICAL_STABILIZATION_MODE_OFF,
         )
+        if (profile.processingControls.hotPixelOff) expect(
+            "hotPixelMode", result.get(CaptureResult.HOT_PIXEL_MODE), CameraMetadata.HOT_PIXEL_MODE_OFF
+        )
+        if (profile.processingControls.blackLevelLock) expect(
+            "blackLevelLock", result.get(CaptureResult.BLACK_LEVEL_LOCK), true
+        )
         if (profile.usesMaximumResolutionPixelMode) expect(
             "sensorPixelMode",
             result.get(CaptureResult.SENSOR_PIXEL_MODE),
@@ -1334,14 +1345,14 @@ class CameraSessionController(
                 ?: error("Capture result omitted focus distance"),
             aperture = result.get(CaptureResult.LENS_APERTURE),
         )
-        if (abs(effective.sensitivityIso - requested.sensitivityIso) > 5) {
+        if (effective.sensitivityIso != requested.sensitivityIso) {
             failures += "sensitivity=${effective.sensitivityIso} (requested ${requested.sensitivityIso})"
         }
         val exposureToleranceNs = maxOf(1_000L, requested.exposureTimeNs / 1_000L)
         if (kotlin.math.abs(effective.exposureTimeNs - requested.exposureTimeNs) > exposureToleranceNs) {
             failures += "exposure=${effective.exposureTimeNs} (requested ${requested.exposureTimeNs})"
         }
-        if (abs(effective.focusDistanceDiopters - requested.focusDistanceDiopters) > 0.05f) {
+        if (abs(effective.focusDistanceDiopters - requested.focusDistanceDiopters) > 0.001f) {
             failures += "focus=${effective.focusDistanceDiopters} (requested ${requested.focusDistanceDiopters})"
         }
         if (requested.aperture != null && effective.aperture != null &&
