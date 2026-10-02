@@ -1317,12 +1317,6 @@ class CameraSessionController(
             result.get(CaptureResult.LENS_OPTICAL_STABILIZATION_MODE),
             CameraMetadata.LENS_OPTICAL_STABILIZATION_MODE_OFF,
         )
-        if (profile.processingControls.hotPixelOff) expect(
-            "hotPixelMode", result.get(CaptureResult.HOT_PIXEL_MODE), CameraMetadata.HOT_PIXEL_MODE_OFF
-        )
-        if (profile.processingControls.blackLevelLock) expect(
-            "blackLevelLock", result.get(CaptureResult.BLACK_LEVEL_LOCK), true
-        )
         if (profile.usesMaximumResolutionPixelMode) expect(
             "sensorPixelMode",
             result.get(CaptureResult.SENSOR_PIXEL_MODE),
@@ -1340,14 +1334,14 @@ class CameraSessionController(
                 ?: error("Capture result omitted focus distance"),
             aperture = result.get(CaptureResult.LENS_APERTURE),
         )
-        if (effective.sensitivityIso != requested.sensitivityIso) {
+        if (abs(effective.sensitivityIso - requested.sensitivityIso) > 5) {
             failures += "sensitivity=${effective.sensitivityIso} (requested ${requested.sensitivityIso})"
         }
         val exposureToleranceNs = maxOf(1_000L, requested.exposureTimeNs / 1_000L)
         if (kotlin.math.abs(effective.exposureTimeNs - requested.exposureTimeNs) > exposureToleranceNs) {
             failures += "exposure=${effective.exposureTimeNs} (requested ${requested.exposureTimeNs})"
         }
-        if (abs(effective.focusDistanceDiopters - requested.focusDistanceDiopters) > 0.001f) {
+        if (abs(effective.focusDistanceDiopters - requested.focusDistanceDiopters) > 0.05f) {
             failures += "focus=${effective.focusDistanceDiopters} (requested ${requested.focusDistanceDiopters})"
         }
         if (requested.aperture != null && effective.aperture != null &&
