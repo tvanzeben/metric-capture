@@ -114,6 +114,9 @@ class MatPoseProcessor(
     private var framesSinceFullDetection = Int.MAX_VALUE
     private var consecutiveTrackingFailures = 0
     private var lastDetectionDiagnosticNs = Long.MIN_VALUE
+    private var lastPlanarRmsPx: Double? = null
+    private val modelXmm = MatModel.pointsMm.mapValues { it.value.x }
+    private val modelYmm = MatModel.pointsMm.mapValues { it.value.y }
     private val poseSmoother = PoseKalmanSmoother()
 
     @Synchronized
@@ -206,6 +209,7 @@ class MatPoseProcessor(
                     "afterCheirality=${cheiralityFiltered.size} " +
                     "bestRmse=${best?.reprojectionRmsePx?.let { "%.2f".format(it) } ?: "n/a"} " +
                     "bestIds=${best?.fiducials?.map { it.id } ?: "n/a"} " +
+                    "planarRms=${lastPlanarRmsPx?.let { "%.2f".format(it) } ?: "n/a"} " +
                     "anchorOnlyRmse=${anchorRmse?.let { "%.2f".format(it) } ?: "n/a (need all 4 of A/B/G/H)"}; " +
                     targetDetail
             } else {
@@ -515,58 +519,23 @@ class MatPoseProcessor(
 
     private fun candidateAssignments(targets: List<TargetObservation>): List<List<FiducialObservation>> {
         if (targets.size < 4) return emptyList()
-        val results = mutableListOf<List<FiducialObservation>>()
-        for (quarterTurn in 0 until 4) {
-            val aList = targets.filter { codeScore(it, FiducialId.A, quarterTurn) >= 0.35 }
-            val bList = targets.filter { codeScore(it, FiducialId.B, quarterTurn) >= 0.35 }
-            val gList = targets.filter { codeScore(it, FiducialId.G, quarterTurn) >= 0.35 }
-            val hList = targets.filter { codeScore(it, FiducialId.H, quarterTurn) >= 0.35 }
-            val cdList = targets.filter { codeScore(it, FiducialId.C, quarterTurn) >= 0.35 }
-            val efList = targets.filter { codeScore(it, FiducialId.E, quarterTurn) >= 0.35 }
-
-            val a = aList.maxByOrNull { it.codeConfidence }
-            val b = bList.maxByOrNull { it.codeConfidence }
-            val g = gList.maxByOrNull { it.codeConfidence }
-            val h = hList.maxByOrNull { it.codeConfidence }
-
-            val cdCandidates = cdList.filter { it !== a && it !== b && it !== g && it !== h }
-            val efCandidates = efList.filter { it !== a && it !== b && it !== g && it !== h && it !in cdCandidates }
-
-            for (swapCd in listOf(false, true)) {
-                for (swapEf in listOf(false, true)) {
-                    val obsList = mutableListOf<FiducialObservation>()
-                    if (a != null) obsList += a.asFiducial(FiducialId.A, quarterTurn)
-                    if (b != null) obsList += b.asFiducial(FiducialId.B, quarterTurn)
-                    if (g != null) obsList += g.asFiducial(FiducialId.G, quarterTurn)
-                    if (h != null) obsList += h.asFiducial(FiducialId.H, quarterTurn)
-
-                    if (cdCandidates.size >= 2) {
-                        val c = cdCandidates[if (swapCd) 1 else 0]
-                        val d = cdCandidates[if (swapCd) 0 else 1]
-                        obsList += c.asFiducial(FiducialId.C, quarterTurn)
-                        obsList += d.asFiducial(FiducialId.D, quarterTurn)
-                    } else if (cdCandidates.size == 1) {
-                        val c = cdCandidates[0]
-                        obsList += c.asFiducial(if (swapCd) FiducialId.D else FiducialId.C, quarterTurn)
-                    }
-
-                    if (efCandidates.size >= 2) {
-                        val e = efCandidates[if (swapEf) 1 else 0]
-                        val f = efCandidates[if (swapEf) 0 else 1]
-                        obsList += e.asFiducial(FiducialId.E, quarterTurn)
-                        obsList += f.asFiducial(FiducialId.F, quarterTurn)
-                    } else if (efCandidates.size == 1) {
-                        val e = efCandidates[0]
-                        obsList += e.asFiducial(if (swapEf) FiducialId.F else FiducialId.E, quarterTurn)
-                    }
-
-                    if (obsList.size >= 4) {
-                        results += obsList
-                    }
-                }
+        // Identity within a color class comes from mat geometry, not quadrant order:
+        // see PlanarCorrespondence for why the decoded code cannot separate C/D/E/F.
+        val ranked = PlanarCorrespondence.candidates(
+            xs = DoubleArray(targets.size) { targets[it].center.x },
+            ys = DoubleArray(targets.size) { targets[it].center.y },
+            classes = targets.map { colorClassOf(it.code) },
+            quality = DoubleArray(targets.size) { targets[it].codeConfidence * targets[it].saddleScore },
+            modelXmm = modelXmm,
+            modelYmm = modelYmm,
+        )
+        lastPlanarRmsPx = ranked.firstOrNull()?.homographyRmsPx
+        return ranked.map { candidate ->
+            candidate.ids.mapIndexedNotNull { index, id ->
+                // codeQuarterTurn is recorded as session metadata only; no geometry depends on it.
+                id?.let { targets[index].asFiducial(it, 0) }
             }
         }
-        return results
     }
 
     private fun solve(timestamp: Long, observations: List<FiducialObservation>): MatPoseResult? {
